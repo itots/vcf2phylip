@@ -12,17 +12,21 @@ down as the number of taxa increases (but is still fast).
 Any ploidy is allowed, but binary NEXUS is produced only for diploid VCFs.
 '''
 
+# The script is a fork modified based on the original v2.1
+# by ITO Tsuyoshi (2020-04-03).
+# The script was modified so as to deal with the situation,
+# where ploidy of genotypes is different by individuals (sex)
+__version__ = "2.1+0.2"
+
+# __author__      = "Edgardo M. Ortiz"
+# __credits__     = "Juan D. Palacio-Mejía"
+# __version__     = "2.1"
+# __email__       = "e.ortiz.v@gmail.com"
+# __date__        = "2019-01-15"
 
 
-__author__      = "Edgardo M. Ortiz"
-__credits__     = "Juan D. Palacio-Mejía"
-__version__     = "2.1"
-__email__       = "e.ortiz.v@gmail.com"
-__date__        = "2019-01-15"
 
-
-
-import sys
+import numpy as np
 import os
 import argparse
 import gzip
@@ -107,9 +111,6 @@ def main():
 
 	############################
 	# Process header of VCF file
-	ploidy = 0
-	gt_idx = []
-	missing = ""
 
 	with opener(filename) as vcf:
 
@@ -139,20 +140,20 @@ def main():
 
 			# Find out the ploidy of the genotypes, just distinguishes if sample is not haploid vs n-ploid
 			elif not line.startswith("#") and line.strip("\n") != "":
-				while ploidy == 0 and missing == "":
-					broken = line.strip("\n").split("\t")
+				broken = line.strip("\n").split("\t")
+				if len(sample_names) == len(broken) - 9:
+					ploidy_list = []
 					for j in range(9, len(broken)):
-						if ploidy == 0:
-							if broken[j].split(":")[0][0] != ".":
-								ploidy = (len(broken[j].split(":")[0]) // 2) + 1
-								gt_idx = [i for i in range(0, len(broken[j].split(":")[0]), 2)]
-								missing = "/".join(["." for i in range(len(gt_idx))])
-								# Uncomment for debugging
-								# print(missing)
-								# print(broken[j])
-								# print(gt_idx)
-								# print(ploidy)
-								break
+						ploidy_list += [
+							(len(broken[j].split(":")[0]) // 2) + 1]
+					# Uncomment for debugging
+					# print(broken[j])
+					# print((len(broken[j].split(":")[0]) // 2) + 1)
+					if max(ploidy_list) == 2 and min(ploidy_list) == 2:
+						ploidy = 2
+					else:
+						ploidy = "n"
+					break
 				
 	vcf.close()
 
@@ -196,6 +197,10 @@ def main():
 		snp_shallow = 0
 		snp_multinuc = 0
 		snp_biallelic = 0
+
+		# Check ploidy
+		ploidy_arr = []
+
 		while 1:
 
 			# Load large chunks of file into memory
@@ -209,9 +214,17 @@ def main():
 
 					# Split line into columns
 					broken = line.strip("\n").split("\t")
+					n_missing = 0
+					ploidy_list = []
 					for g in range(9,len(broken)):
+						ploidy = (len(broken[g].split(":")[0]) // 2) + 1
+						ploidy_list += [ploidy]
 						if broken[g].split(":")[0][0] == ".":
+							missing = "/".join(["."] * ploidy)
 							broken[g] = missing
+							n_missing += 1
+
+					ploidy_arr += [ploidy_list]
 
 					# Keep track of number of genotypes processed
 					snp_num += 1
@@ -221,7 +234,7 @@ def main():
 						print(str(snp_num)+" genotypes processed.")
 
 					# Check if the SNP has the minimum of samples required
-					if (len(broken[9:]) - broken[9:].count(missing)) >= min_samples_locus:
+					if len(broken[9:]) - n_missing >= min_samples_locus:
 						
 						# Check that ref genotype is a single nucleotide and alternative genotypes are single nucleotides
 						# print(broken)
@@ -247,7 +260,12 @@ def main():
 								# Translate genotypes into nucleotides and the obtain the IUPAC ambiguity
 								# for heterozygous SNPs, and append to DNA sequence of each sample
 								try:
-									site_tmp = ''.join([amb[''.join(sorted(set([nuc[broken[i][j]] for j in gt_idx])))] for i in range(9, index_last_sample)])
+									site_tmp = []
+									for i in range(9, index_last_sample):
+										gt_idx = [i for i in range(0, len(broken[i].split(":")[0]), 2)]
+										for j in gt_idx:
+											site_tmp += amb[''.join(sorted(set(nuc[broken[i][j]])))]
+									site_tmp = ''.join(site_tmp)
 								except KeyError:
 									print("Skipped potentially malformed line: " + line)
 									continue
@@ -268,7 +286,12 @@ def main():
 									snp_biallelic += 1
 
 									# Translate genotype into 0 for homozygous ref, 1 for heterozygous, and 2 for homozygous alt
-									binsite_tmp = ''.join([(gen_bin[broken[i][0:3]]) for i in range(9, index_last_sample)])
+									try:
+										binsite_tmp = ''.join([(gen_bin[broken[i][0:3]]) for i in range(9, index_last_sample)])
+									except KeyError:
+										print(
+											"Skipped potentially malformed line: " + line)
+										continue
 
 									# Write entire row to temporary file
 									temporalbin.write(binsite_tmp+"\n")
@@ -281,6 +304,17 @@ def main():
 						# Keep track of loci rejected due to exceeded missing data
 						snp_shallow += 1
 
+		# Print ploidy
+		if len(np.unique(np.array(ploidy_arr), axis=0)) == 1:
+			u, counts = np.unique(np.unique(np.array(ploidy_arr), axis=0),return_counts=True)
+			print("\nPloidy:")
+			for i in range(len(u)):
+				print("%d (N = %d)" % (u[i], counts[i]))
+		else:
+			print("Ploidy is different by loci, ranging from %d to %d"
+				  % (np.unique(np.array(ploidy_arr)).min(), np.unique(np.array(ploidy_arr)).max()))
+		print("")
+
 		# Print useful information about filtering of SNPs
 		print("Total of genotypes processed: " + str(snp_num))
 		print("Genotypes excluded because they exceeded the amount of missing data allowed: " + str(snp_shallow))
@@ -288,6 +322,8 @@ def main():
 		print("SNPs that passed the filters: " + str(snp_accepted))
 		if nexusbin:
 			print("Biallelic SNPs selected for binary NEXUS: " + str(snp_biallelic))
+			if np.count_nonzero(np.unique(np.array(ploidy_arr)) != 2) > 0:
+				print("Warning: the vcf file contains non-diploid genotypes")
 		print("")
 
 	vcf.close()
