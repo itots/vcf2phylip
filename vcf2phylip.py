@@ -268,7 +268,6 @@ def main():
 								except KeyError:
 									print("Skipped potentially malformed line: " + line)
 									continue
-								amb[''.join(sorted(set([nuc[broken[i][j]] for j in gt_idx])))]
 
 								# Write entire row of single nucleotide genotypes to temporary file
 								temporal.write(site_tmp+"\n")
