@@ -13,10 +13,10 @@ Any ploidy is allowed, but binary NEXUS is produced only for diploid VCFs.
 '''
 
 # The script is a fork modified based on the original v2.1
-# by ITO Tsuyoshi (2020-04-03).
+# by ITO Tsuyoshi (2020-04-07).
 # The script was modified so as to deal with the situation,
 # where ploidy of genotypes is different by individuals (sex)
-__version__ = "2.1+0.2"
+__version__ = "2.1+0.3"
 
 # __author__      = "Edgardo M. Ortiz"
 # __credits__     = "Juan D. Palacio-Mejía"
@@ -263,12 +263,12 @@ def main():
 									site_tmp = []
 									for i in range(9, index_last_sample):
 										gt_idx = [i for i in range(0, len(broken[i].split(":")[0]), 2)]
-										for j in gt_idx:
-											site_tmp += amb[''.join(sorted(set(nuc[broken[i][j]])))]
+										site_tmp += amb[''.join(sorted(set([nuc[broken[i][j]] for j in gt_idx])))]
 									site_tmp = ''.join(site_tmp)
 								except KeyError:
 									print("Skipped potentially malformed line: " + line)
 									continue
+								amb[''.join(sorted(set([nuc[broken[i][j]] for j in gt_idx])))]
 
 								# Write entire row of single nucleotide genotypes to temporary file
 								temporal.write(site_tmp+"\n")
